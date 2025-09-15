@@ -8,7 +8,7 @@ COLUMNS = 10
 ROWS = 20
 GRID_W = COLUMNS * BLOCK_SIZE
 GRID_H = ROWS * BLOCK_SIZE
-SIDE_PANEL_W = 160
+SIDE_PANEL_W = 200
 
 WIDTH = GRID_W + SIDE_PANEL_W
 HEIGHT = GRID_H
@@ -98,18 +98,15 @@ def draw_grid(surface, grid):
     for y in range(ROWS + 1):
         pygame.draw.line(surface, DGRAY, (0, y * BLOCK_SIZE), (GRID_W, y * BLOCK_SIZE))
 
-def draw_next_piece(surface, next_piece, panel_x):
-    font = pygame.font.SysFont("Arial", 20, bold=True)
-    label = font.render("Next:", True, WHITE)
-    surface.blit(label, (panel_x + 20, 150))
-    for i, row in enumerate(next_piece.shape):
+def draw_mini_piece(surface, piece, x, y):
+    for i, row in enumerate(piece.shape):
         for j, v in enumerate(row):
             if v:
-                rect = pygame.Rect(panel_x + 40 + j * 20, 190 + i * 20, 20, 20)
-                pygame.draw.rect(surface, next_piece.color, rect)
+                rect = pygame.Rect(x + j * 20, y + i * 20, 20, 20)
+                pygame.draw.rect(surface, piece.color, rect)
                 pygame.draw.rect(surface, BLACK, rect, 1)
 
-def draw_side_panel(surface, score, lines, level, next_piece, music_on):
+def draw_side_panel(surface, score, lines, level, next_piece, hold_piece, music_on):
     panel_x = GRID_W
     pygame.draw.rect(surface, (25, 25, 25), (panel_x, 0, SIDE_PANEL_W, HEIGHT))
 
@@ -125,13 +122,20 @@ def draw_side_panel(surface, score, lines, level, next_piece, music_on):
     surface.blit(font.render("Level", True, WHITE), (panel_x + 20, 140))
     surface.blit(value.render(str(level), True, YELLOW), (panel_x + 20, 165))
 
-    draw_next_piece(surface, next_piece, panel_x)
+    # next
+    surface.blit(font.render("Next:", True, WHITE), (panel_x + 20, 200))
+    draw_mini_piece(surface, next_piece, panel_x + 40, 230)
 
-    # stato musica
+    # hold
+    surface.blit(font.render("Hold:", True, WHITE), (panel_x + 20, 300))
+    if hold_piece:
+        draw_mini_piece(surface, hold_piece, panel_x + 40, 330)
+
+    # musica
     status = "ON" if music_on else "OFF"
-    surface.blit(font.render(f"Music: {status}", True, WHITE), (panel_x + 20, 400))
+    surface.blit(font.render(f"Music: {status}", True, WHITE), (panel_x + 20, 420))
 
-def draw_window(surface, grid, score, lines, level, next_piece, ghost_pos, game_over, flash_rows, music_on):
+def draw_window(surface, grid, score, lines, level, next_piece, hold_piece, ghost_pos, game_over, flash_rows, music_on):
     surface.fill((10, 10, 30))
     for x, y in ghost_pos:
         if y >= 0:
@@ -142,7 +146,7 @@ def draw_window(surface, grid, score, lines, level, next_piece, ghost_pos, game_
                 color = WHITE if y in flash_rows else grid[y][x]
                 draw_block(surface, x, y, color)
     draw_grid(surface, grid)
-    draw_side_panel(surface, score, lines, level, next_piece, music_on)
+    draw_side_panel(surface, score, lines, level, next_piece, hold_piece, music_on)
 
     if game_over:
         font = pygame.font.SysFont("Arial", 48, bold=True)
@@ -154,17 +158,11 @@ def main():
     pygame.init()
     pygame.mixer.init()
     screen = pygame.display.set_mode((WIDTH, HEIGHT))
-    pygame.display.set_caption("Tetris con Musica Toggle")
+    pygame.display.set_caption("Tetris con Hold Piece")
     clock = pygame.time.Clock()
 
-    # 🎵 carica musica
-    try:
-        pygame.mixer.music.load("music/tetris_theme.ogg")  # <--- metti il tuo file qui
-        pygame.mixer.music.play(-1)
-        music_on = True
-    except:
-        music_on = False
-        print("⚠️ Nessun file musicale trovato.")
+    # musica opzionale
+    music_on = False
 
     fall_time = 0
     fall_speed = 0.5
@@ -177,6 +175,8 @@ def main():
 
     current_piece = Tetromino(random.choice(SHAPES), random.choice(COLORS))
     next_piece = Tetromino(random.choice(SHAPES), random.choice(COLORS))
+    hold_piece = None
+    can_hold = True
 
     game_over = False
     flash_timer = 0
@@ -202,6 +202,7 @@ def main():
                     else:
                         current_piece = next_piece
                         next_piece = Tetromino(random.choice(SHAPES), random.choice(COLORS))
+                        can_hold = True  # reset hold per il nuovo turno
                         if not valid_space(current_piece, grid):
                             game_over = True
 
@@ -231,7 +232,16 @@ def main():
                         while valid_space(current_piece, grid):
                             current_piece.y += 1
                         current_piece.y -= 1
-                # toggle musica
+                    elif event.key == pygame.K_c and can_hold:  # --- HOLD piece
+                        if hold_piece is None:
+                            hold_piece = current_piece
+                            current_piece = next_piece
+                            next_piece = Tetromino(random.choice(SHAPES), random.choice(COLORS))
+                        else:
+                            hold_piece, current_piece = current_piece, hold_piece
+                        current_piece.x = COLUMNS // 2 - len(current_piece.shape[0]) // 2
+                        current_piece.y = 0
+                        can_hold = False
                 if event.key == pygame.K_m:
                     if music_on:
                         pygame.mixer.music.pause()
@@ -271,10 +281,11 @@ def main():
                 flash_rows = []
                 current_piece = next_piece
                 next_piece = Tetromino(random.choice(SHAPES), random.choice(COLORS))
+                can_hold = True
                 if not valid_space(current_piece, grid):
                     game_over = True
 
-        draw_window(screen, grid, score, lines, level, next_piece, ghost_pos, game_over, flash_rows, music_on)
+        draw_window(screen, grid, score, lines, level, next_piece, hold_piece, ghost_pos, game_over, flash_rows, music_on)
         pygame.display.update()
 
     pygame.quit()
