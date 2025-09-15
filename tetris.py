@@ -15,7 +15,6 @@ SIDE_PANEL_W = 220
 WIDTH = GRID_W + SIDE_PANEL_W
 HEIGHT = GRID_H
 
-# File high score
 HIGHSCORE_FILE = "highscore.txt"
 
 # Colori
@@ -58,6 +57,23 @@ class Tetromino:
 
     def rotate(self):
         self.shape = [list(r) for r in zip(*self.shape[::-1])]
+
+# --- Randomizer 7-bag ---
+class BagRandomizer:
+    def __init__(self):
+        self.bag = []
+        self.refill()
+
+    def refill(self):
+        indices = list(range(len(SHAPES)))
+        random.shuffle(indices)
+        self.bag.extend(indices)
+
+    def get_piece(self):
+        if not self.bag:
+            self.refill()
+        idx = self.bag.pop(0)
+        return Tetromino(SHAPES[idx], COLORS[idx])
 
 # --- Funzioni griglia ---
 def create_grid(locked_positions={}):
@@ -195,20 +211,17 @@ def game_menu(screen):
 
         for event in pygame.event.get():
             if event.type == pygame.QUIT:
-                pygame.quit()
-                sys.exit()
+                pygame.quit(); sys.exit()
             if event.type == pygame.KEYDOWN:
-                if event.key == pygame.K_1:
-                    return "Marathon"
-                elif event.key == pygame.K_2:
-                    return "Time Attack"
+                if event.key == pygame.K_1: return "Marathon"
+                elif event.key == pygame.K_2: return "Time Attack"
 
 # --- Main ---
 def main():
     pygame.init()
     pygame.mixer.init()
     screen = pygame.display.set_mode((WIDTH, HEIGHT))
-    pygame.display.set_caption("Tetris con Modalità")
+    pygame.display.set_caption("Tetris con 7-Bag")
     clock = pygame.time.Clock()
 
     mode = game_menu(screen)
@@ -223,14 +236,15 @@ def main():
     highscore = load_highscore()
 
     if mode == "Time Attack":
-        total_time = 180  # 3 minuti
+        total_time = 180
         start_time = time.time()
 
     locked_positions = {}
     grid = create_grid(locked_positions)
 
-    current_piece = Tetromino(random.choice(SHAPES), random.choice(COLORS))
-    next_piece = Tetromino(random.choice(SHAPES), random.choice(COLORS))
+    bag = BagRandomizer()
+    current_piece = bag.get_piece()
+    next_piece = bag.get_piece()
     hold_piece = None
     can_hold = True
 
@@ -244,7 +258,6 @@ def main():
         fall_time += clock.get_rawtime()
         dt = clock.tick()
 
-        # Calcola tempo rimasto
         time_left = 0
         if mode == "Time Attack" and not game_over:
             elapsed = int(time.time() - start_time)
@@ -265,12 +278,11 @@ def main():
                         flash_timer = 400
                     else:
                         current_piece = next_piece
-                        next_piece = Tetromino(random.choice(SHAPES), random.choice(COLORS))
+                        next_piece = bag.get_piece()
                         can_hold = True
                         if not valid_space(current_piece, grid):
                             game_over = True
 
-        # Eventi
         for event in pygame.event.get():
             if event.type == pygame.QUIT:
                 running = False
@@ -300,7 +312,7 @@ def main():
                         if hold_piece is None:
                             hold_piece = current_piece
                             current_piece = next_piece
-                            next_piece = Tetromino(random.choice(SHAPES), random.choice(COLORS))
+                            next_piece = bag.get_piece()
                         else:
                             hold_piece, current_piece = current_piece, hold_piece
                         current_piece.x = COLUMNS // 2 - len(current_piece.shape[0]) // 2
@@ -308,13 +320,10 @@ def main():
                         can_hold = False
                 if event.key == pygame.K_m:
                     if music_on:
-                        pygame.mixer.music.pause()
-                        music_on = False
+                        pygame.mixer.music.pause(); music_on = False
                     else:
-                        pygame.mixer.music.unpause()
-                        music_on = True
+                        pygame.mixer.music.unpause(); music_on = True
 
-        # ghost piece
         ghost = Tetromino(current_piece.shape, current_piece.color)
         ghost.x, ghost.y = current_piece.x, current_piece.y
         while valid_space(ghost, grid):
@@ -346,7 +355,7 @@ def main():
                     fall_speed = max(0.1, fall_speed * 0.9)
                 flash_rows = []
                 current_piece = next_piece
-                next_piece = Tetromino(random.choice(SHAPES), random.choice(COLORS))
+                next_piece = bag.get_piece()
                 can_hold = True
                 if not valid_space(current_piece, grid):
                     game_over = True
