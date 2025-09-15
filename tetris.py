@@ -1,6 +1,7 @@
 import pygame
 import random
 import sys
+import os
 
 # --- Costanti ---
 BLOCK_SIZE = 30
@@ -12,6 +13,9 @@ SIDE_PANEL_W = 200
 
 WIDTH = GRID_W + SIDE_PANEL_W
 HEIGHT = GRID_H
+
+# File high score
+HIGHSCORE_FILE = "highscore.txt"
 
 # Colori
 BLACK  = (0, 0, 0)
@@ -79,7 +83,21 @@ def clear_rows(grid, locked):
             cleared_rows.append(y)
     return cleared_rows
 
-# --- Grafica blocchi ---
+# --- High score ---
+def load_highscore():
+    if os.path.exists(HIGHSCORE_FILE):
+        try:
+            with open(HIGHSCORE_FILE, "r") as f:
+                return int(f.read().strip())
+        except:
+            return 0
+    return 0
+
+def save_highscore(score):
+    with open(HIGHSCORE_FILE, "w") as f:
+        f.write(str(score))
+
+# --- Grafica ---
 def draw_block(surface, x, y, color, ghost=False):
     rect = pygame.Rect(x * BLOCK_SIZE, y * BLOCK_SIZE, BLOCK_SIZE, BLOCK_SIZE)
     if ghost:
@@ -106,36 +124,41 @@ def draw_mini_piece(surface, piece, x, y):
                 pygame.draw.rect(surface, piece.color, rect)
                 pygame.draw.rect(surface, BLACK, rect, 1)
 
-def draw_side_panel(surface, score, lines, level, next_piece, hold_piece, music_on):
+def draw_side_panel(surface, score, highscore, lines, level, next_piece, hold_piece, music_on):
     panel_x = GRID_W
     pygame.draw.rect(surface, (25, 25, 25), (panel_x, 0, SIDE_PANEL_W, HEIGHT))
 
     font = pygame.font.SysFont("Arial", 20, bold=True)
     value = pygame.font.SysFont("Arial", 18)
 
+    # punteggi
     surface.blit(font.render("Score", True, WHITE), (panel_x + 20, 20))
     surface.blit(value.render(str(score), True, YELLOW), (panel_x + 20, 45))
 
-    surface.blit(font.render("Lines", True, WHITE), (panel_x + 20, 80))
-    surface.blit(value.render(str(lines), True, YELLOW), (panel_x + 20, 105))
+    surface.blit(font.render("High Score", True, WHITE), (panel_x + 20, 80))
+    surface.blit(value.render(str(highscore), True, YELLOW), (panel_x + 20, 105))
 
-    surface.blit(font.render("Level", True, WHITE), (panel_x + 20, 140))
-    surface.blit(value.render(str(level), True, YELLOW), (panel_x + 20, 165))
+    # linee e livello
+    surface.blit(font.render("Lines", True, WHITE), (panel_x + 20, 140))
+    surface.blit(value.render(str(lines), True, YELLOW), (panel_x + 20, 165))
+
+    surface.blit(font.render("Level", True, WHITE), (panel_x + 20, 200))
+    surface.blit(value.render(str(level), True, YELLOW), (panel_x + 20, 225))
 
     # next
-    surface.blit(font.render("Next:", True, WHITE), (panel_x + 20, 200))
-    draw_mini_piece(surface, next_piece, panel_x + 40, 230)
+    surface.blit(font.render("Next:", True, WHITE), (panel_x + 20, 270))
+    draw_mini_piece(surface, next_piece, panel_x + 40, 300)
 
     # hold
-    surface.blit(font.render("Hold:", True, WHITE), (panel_x + 20, 300))
+    surface.blit(font.render("Hold:", True, WHITE), (panel_x + 20, 370))
     if hold_piece:
-        draw_mini_piece(surface, hold_piece, panel_x + 40, 330)
+        draw_mini_piece(surface, hold_piece, panel_x + 40, 400)
 
     # musica
     status = "ON" if music_on else "OFF"
-    surface.blit(font.render(f"Music: {status}", True, WHITE), (panel_x + 20, 420))
+    surface.blit(font.render(f"Music: {status}", True, WHITE), (panel_x + 20, 470))
 
-def draw_window(surface, grid, score, lines, level, next_piece, hold_piece, ghost_pos, game_over, flash_rows, music_on):
+def draw_window(surface, grid, score, highscore, lines, level, next_piece, hold_piece, ghost_pos, game_over, flash_rows, music_on):
     surface.fill((10, 10, 30))
     for x, y in ghost_pos:
         if y >= 0:
@@ -146,7 +169,7 @@ def draw_window(surface, grid, score, lines, level, next_piece, hold_piece, ghos
                 color = WHITE if y in flash_rows else grid[y][x]
                 draw_block(surface, x, y, color)
     draw_grid(surface, grid)
-    draw_side_panel(surface, score, lines, level, next_piece, hold_piece, music_on)
+    draw_side_panel(surface, score, highscore, lines, level, next_piece, hold_piece, music_on)
 
     if game_over:
         font = pygame.font.SysFont("Arial", 48, bold=True)
@@ -158,10 +181,9 @@ def main():
     pygame.init()
     pygame.mixer.init()
     screen = pygame.display.set_mode((WIDTH, HEIGHT))
-    pygame.display.set_caption("Tetris con Hold Piece")
+    pygame.display.set_caption("Tetris con High Score")
     clock = pygame.time.Clock()
 
-    # musica opzionale
     music_on = False
 
     fall_time = 0
@@ -169,6 +191,8 @@ def main():
     score = 0
     lines = 0
     level = 1
+
+    highscore = load_highscore()
 
     locked_positions = {}
     grid = create_grid(locked_positions)
@@ -202,7 +226,7 @@ def main():
                     else:
                         current_piece = next_piece
                         next_piece = Tetromino(random.choice(SHAPES), random.choice(COLORS))
-                        can_hold = True  # reset hold per il nuovo turno
+                        can_hold = True
                         if not valid_space(current_piece, grid):
                             game_over = True
 
@@ -232,7 +256,7 @@ def main():
                         while valid_space(current_piece, grid):
                             current_piece.y += 1
                         current_piece.y -= 1
-                    elif event.key == pygame.K_c and can_hold:  # --- HOLD piece
+                    elif event.key == pygame.K_c and can_hold:
                         if hold_piece is None:
                             hold_piece = current_piece
                             current_piece = next_piece
@@ -275,6 +299,8 @@ def main():
                             locked_positions[(lx, ly + 1)] = locked_positions.pop((lx, ly))
                 score += LINE_SCORES.get(len(flash_rows), 0) * level
                 lines += len(flash_rows)
+                if score > highscore:
+                    highscore = score
                 if lines % 10 == 0:
                     level += 1
                     fall_speed = max(0.1, fall_speed * 0.9)
@@ -285,8 +311,12 @@ def main():
                 if not valid_space(current_piece, grid):
                     game_over = True
 
-        draw_window(screen, grid, score, lines, level, next_piece, hold_piece, ghost_pos, game_over, flash_rows, music_on)
+        draw_window(screen, grid, score, highscore, lines, level, next_piece, hold_piece, ghost_pos, game_over, flash_rows, music_on)
         pygame.display.update()
+
+    # Salva highscore se superato
+    if score > highscore:
+        save_highscore(score)
 
     pygame.quit()
     sys.exit()
