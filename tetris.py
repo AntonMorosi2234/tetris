@@ -13,7 +13,7 @@ SIDE_PANEL_W = 160
 WIDTH = GRID_W + SIDE_PANEL_W
 HEIGHT = GRID_H
 
-# Colori base
+# Colori
 BLACK  = (0, 0, 0)
 DGRAY  = (40, 40, 40)
 WHITE  = (255, 255, 255)
@@ -32,13 +32,13 @@ COLORS = [
 ]
 
 SHAPES = [
-    [[1, 1, 1, 1]],                       # I
-    [[1, 0, 0], [1, 1, 1]],               # J
-    [[0, 0, 1], [1, 1, 1]],               # L
-    [[1, 1], [1, 1]],                     # O
-    [[0, 1, 1], [1, 1, 0]],               # S
-    [[0, 1, 0], [1, 1, 1]],               # T
-    [[1, 1, 0], [0, 1, 1]]                # Z
+    [[1, 1, 1, 1]],                       
+    [[1, 0, 0], [1, 1, 1]],               
+    [[0, 0, 1], [1, 1, 1]],               
+    [[1, 1], [1, 1]],                     
+    [[0, 1, 1], [1, 1, 0]],               
+    [[0, 1, 0], [1, 1, 1]],               
+    [[1, 1, 0], [0, 1, 1]]                
 ]
 
 LINE_SCORES = {1: 100, 2: 300, 3: 500, 4: 800}
@@ -55,12 +55,7 @@ class Tetromino:
         self.shape = [list(r) for r in zip(*self.shape[::-1])]
 
     def positions(self):
-        pos = []
-        for i, row in enumerate(self.shape):
-            for j, v in enumerate(row):
-                if v:
-                    pos.append((self.x + j, self.y + i))
-        return pos
+        return [(self.x + j, self.y + i) for i, row in enumerate(self.shape) for j, v in enumerate(row) if v]
 
 # --- Funzioni griglia ---
 def create_grid(locked_positions={}):
@@ -84,13 +79,12 @@ def clear_rows(grid, locked):
             cleared_rows.append(y)
     return cleared_rows
 
-# --- Grafica dei blocchi ---
+# --- Grafica blocchi ---
 def draw_block(surface, x, y, color, ghost=False):
     rect = pygame.Rect(x * BLOCK_SIZE, y * BLOCK_SIZE, BLOCK_SIZE, BLOCK_SIZE)
     if ghost:
         pygame.draw.rect(surface, GHOST, rect)
     else:
-        # rettangolo colorato con bordo nero
         pygame.draw.rect(surface, color, rect)
         pygame.draw.rect(surface, BLACK, rect, 2)
 
@@ -99,7 +93,6 @@ def draw_grid(surface, grid):
         for x in range(COLUMNS):
             if grid[y][x] != BLACK:
                 draw_block(surface, x, y, grid[y][x])
-    # griglia di sfondo
     for x in range(COLUMNS + 1):
         pygame.draw.line(surface, DGRAY, (x * BLOCK_SIZE, 0), (x * BLOCK_SIZE, GRID_H))
     for y in range(ROWS + 1):
@@ -116,7 +109,7 @@ def draw_next_piece(surface, next_piece, panel_x):
                 pygame.draw.rect(surface, next_piece.color, rect)
                 pygame.draw.rect(surface, BLACK, rect, 1)
 
-def draw_side_panel(surface, score, lines, level, next_piece):
+def draw_side_panel(surface, score, lines, level, next_piece, music_on):
     panel_x = GRID_W
     pygame.draw.rect(surface, (25, 25, 25), (panel_x, 0, SIDE_PANEL_W, HEIGHT))
 
@@ -134,20 +127,22 @@ def draw_side_panel(surface, score, lines, level, next_piece):
 
     draw_next_piece(surface, next_piece, panel_x)
 
-def draw_window(surface, grid, score, lines, level, next_piece, ghost_pos, game_over, flash_rows):
-    surface.fill((10, 10, 30))  # sfondo blu scuro
-    # disegna ghost piece
+    # stato musica
+    status = "ON" if music_on else "OFF"
+    surface.blit(font.render(f"Music: {status}", True, WHITE), (panel_x + 20, 400))
+
+def draw_window(surface, grid, score, lines, level, next_piece, ghost_pos, game_over, flash_rows, music_on):
+    surface.fill((10, 10, 30))
     for x, y in ghost_pos:
         if y >= 0:
             draw_block(surface, x, y, GHOST, ghost=True)
-    # disegna griglia con pezzi
     for y in range(ROWS):
         for x in range(COLUMNS):
             if grid[y][x] != BLACK:
                 color = WHITE if y in flash_rows else grid[y][x]
                 draw_block(surface, x, y, color)
     draw_grid(surface, grid)
-    draw_side_panel(surface, score, lines, level, next_piece)
+    draw_side_panel(surface, score, lines, level, next_piece, music_on)
 
     if game_over:
         font = pygame.font.SysFont("Arial", 48, bold=True)
@@ -157,10 +152,19 @@ def draw_window(surface, grid, score, lines, level, next_piece, ghost_pos, game_
 # --- Main ---
 def main():
     pygame.init()
+    pygame.mixer.init()
     screen = pygame.display.set_mode((WIDTH, HEIGHT))
-    pygame.display.set_caption("Tetris Grafico")
+    pygame.display.set_caption("Tetris con Musica Toggle")
     clock = pygame.time.Clock()
-    font = pygame.font.SysFont("Arial", 24)
+
+    # 🎵 carica musica
+    try:
+        pygame.mixer.music.load("music/tetris_theme.ogg")  # <--- metti il tuo file qui
+        pygame.mixer.music.play(-1)
+        music_on = True
+    except:
+        music_on = False
+        print("⚠️ Nessun file musicale trovato.")
 
     fall_time = 0
     fall_speed = 0.5
@@ -194,7 +198,7 @@ def main():
                         locked_positions[pos] = current_piece.color
                     flash_rows = clear_rows(grid, locked_positions)
                     if flash_rows:
-                        flash_timer = 400  # ms di lampeggio
+                        flash_timer = 400
                     else:
                         current_piece = next_piece
                         next_piece = Tetromino(random.choice(SHAPES), random.choice(COLORS))
@@ -205,27 +209,36 @@ def main():
         for event in pygame.event.get():
             if event.type == pygame.QUIT:
                 running = False
-            if event.type == pygame.KEYDOWN and not game_over:
-                if event.key == pygame.K_LEFT:
-                    current_piece.x -= 1
-                    if not valid_space(current_piece, grid):
-                        current_piece.x += 1
-                elif event.key == pygame.K_RIGHT:
-                    current_piece.x += 1
-                    if not valid_space(current_piece, grid):
+            if event.type == pygame.KEYDOWN:
+                if not game_over:
+                    if event.key == pygame.K_LEFT:
                         current_piece.x -= 1
-                elif event.key == pygame.K_DOWN:
-                    current_piece.y += 1
-                    if not valid_space(current_piece, grid):
-                        current_piece.y -= 1
-                elif event.key == pygame.K_UP:
-                    current_piece.rotate()
-                    if not valid_space(current_piece, grid):
-                        for _ in range(3): current_piece.rotate()
-                elif event.key == pygame.K_SPACE:
-                    while valid_space(current_piece, grid):
+                        if not valid_space(current_piece, grid):
+                            current_piece.x += 1
+                    elif event.key == pygame.K_RIGHT:
+                        current_piece.x += 1
+                        if not valid_space(current_piece, grid):
+                            current_piece.x -= 1
+                    elif event.key == pygame.K_DOWN:
                         current_piece.y += 1
-                    current_piece.y -= 1
+                        if not valid_space(current_piece, grid):
+                            current_piece.y -= 1
+                    elif event.key == pygame.K_UP:
+                        current_piece.rotate()
+                        if not valid_space(current_piece, grid):
+                            for _ in range(3): current_piece.rotate()
+                    elif event.key == pygame.K_SPACE:
+                        while valid_space(current_piece, grid):
+                            current_piece.y += 1
+                        current_piece.y -= 1
+                # toggle musica
+                if event.key == pygame.K_m:
+                    if music_on:
+                        pygame.mixer.music.pause()
+                        music_on = False
+                    else:
+                        pygame.mixer.music.unpause()
+                        music_on = True
 
         # ghost piece
         ghost = Tetromino(current_piece.shape, current_piece.color)
@@ -235,13 +248,11 @@ def main():
         ghost.y -= 1
         ghost_pos = convert_shape_format(ghost)
 
-        # Disegna pezzo attuale
         if not game_over and flash_timer == 0:
             for x, y in convert_shape_format(current_piece):
                 if y >= 0:
                     grid[y][x] = current_piece.color
 
-        # Gestione lampeggio righe
         if flash_timer > 0:
             flash_timer -= dt
             if flash_timer <= 0:
@@ -263,7 +274,7 @@ def main():
                 if not valid_space(current_piece, grid):
                     game_over = True
 
-        draw_window(screen, grid, score, lines, level, next_piece, ghost_pos, game_over, flash_rows)
+        draw_window(screen, grid, score, lines, level, next_piece, ghost_pos, game_over, flash_rows, music_on)
         pygame.display.update()
 
     pygame.quit()
