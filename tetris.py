@@ -35,7 +35,6 @@ COLORS = {
     "Z": (255, 0, 0),
 }
 
-# Punteggi righe
 LINE_SCORES = {1: 100, 2: 300, 3: 500, 4: 800}
 
 # =========================
@@ -306,6 +305,67 @@ def draw_board_vs(surf, grid, ox, title, nextp, holdp, ghost_pos=None):
     if holdp: draw_mini_piece(surf, holdp, ox + GRID_W - 90, GRID_H - 72, scale=18)
 
 # =========================
+# Controller support
+# =========================
+DEADZONE = 0.35
+REPEAT_DELAY = 150  # ms tra movimenti orizzontali ripetuti da stick
+
+def init_controllers():
+    pygame.joystick.init()
+    ctrls = []
+    for i in range(pygame.joystick.get_count()):
+        j = pygame.joystick.Joystick(i)
+        j.init()
+        ctrls.append(j)
+    return ctrls
+
+def axis_once(timer_dict, key, now, delay=REPEAT_DELAY):
+    """Restituisce True se è passato abbastanza tempo per ripetere l'azione."""
+    t = timer_dict.get(key, 0)
+    if now - t >= delay:
+        timer_dict[key] = now
+        return True
+    return False
+
+def read_controller_actions(joy, repeat_timers):
+    """Ritorna una lista di azioni astratte dal controller."""
+    if joy is None: return []
+    actions = []
+    now = pygame.time.get_ticks()
+
+    # Assi (0: orizz, 1: vert). Use deadzone e auto-repeat per L/R
+    try:
+        ax0 = joy.get_axis(0)
+        ax1 = joy.get_axis(1)
+    except Exception:
+        ax0, ax1 = 0.0, 0.0
+
+    if ax0 < -DEADZONE and axis_once(repeat_timers, "left", now):
+        actions.append("left")
+    if ax0 >  DEADZONE and axis_once(repeat_timers, "right", now):
+        actions.append("right")
+    if ax1 >  DEADZONE:
+        actions.append("down")
+
+    # Bottoni tipici XBOX/PS (fallback generico)
+    # 0:A / X → rotate_cw
+    # 1:B / O → rotate_ccw
+    # 2:X / Square → rotate_180 (o alternativa)
+    # 3:Y / Triangle → hold
+    # 5:RB → hard drop
+    # 7:Start → pausa (gestita fuori)
+    try:
+        if joy.get_button(0): actions.append("rotate_cw")
+        if joy.get_button(1): actions.append("rotate_ccw")
+        if joy.get_button(2): actions.append("rotate_180")
+        if joy.get_button(3): actions.append("hold")
+        if joy.get_button(5): actions.append("hard_drop")
+    except Exception:
+        pass
+
+    return actions
+
+# =========================
 # Menu e Istruzioni
 # =========================
 def show_instructions(screen):
@@ -318,16 +378,16 @@ def show_instructions(screen):
     screen.blit(title, (W // 2 - title.get_width() // 2, 40))
 
     p1 = [
-        "Giocatore 1 (Freccette + RCtrl/RShift):",
+        "Giocatore 1 (Freccette + RCtrl/RShift) o Controller 1:",
         "← → : Muovi | ↓ : Soft Drop (+1/cella)",
-        "↑ : Rotazione CW | Z : CCW | X : 180°",
-        "RShift : Hard Drop | RCtrl : Hold",
+        "↑ : CW | Z : CCW | X : 180° | RShift : Hard Drop | RCtrl : Hold",
+        "Controller: Stick SX (muovi), A: CW, B: CCW, X: 180°, Y: Hold, RB: Drop",
     ]
     p2 = [
-        "Giocatore 2 (WASD + Q/E/C/Space):",
+        "Giocatore 2 (WASD + Q/E/C/Space) o Controller 2:",
         "A D : Muovi | S : Soft Drop (+1/cella)",
-        "W : CW | Q : CCW | E : 180°",
-        "Space : Hard Drop | C : Hold",
+        "W : CW | Q : CCW | E : 180° | Space : Hard Drop | C : Hold",
+        "Controller: Stick SX, A: CW, B: CCW, X: 180°, Y: Hold, RB: Drop",
     ]
     misc = [
         "Generali: M = Musica ON/OFF | P = Pausa",
@@ -424,6 +484,11 @@ def run_single(mode):
     #     music_on = True
     # except: pass
 
+    # Controller
+    controllers = init_controllers()
+    joy1 = controllers[0] if len(controllers) >= 1 else None
+    repeat_timers_p1 = {}
+
     fall_time = 0
     fall_speed = 0.5
     score = 0
@@ -482,25 +547,7 @@ def run_single(mode):
             if time_left == 0:
                 game_over = True
 
-        # caduta automatica
-        if not game_over and flash_timer == 0 and fall_time >= fall_speed*1000:
-            fall_time = 0
-            cur.y += 1
-            if not valid_space(cur, grid):
-                cur.y -= 1
-                # lock
-                for pos in cur.cells():
-                    locked[pos] = cur.color
-                # check righe
-                to_clear = [y for y in range(ROWS) if all((x,y) in locked for x in range(COLUMNS))]
-                if to_clear:
-                    flash_rows = to_clear[:]
-                    flash_timer = 350
-                else:
-                    cur = nxt; nxt = bag.get_piece(); can_hold = True
-                    if not valid_space(cur, grid): game_over = True
-
-        # eventi
+        # === INPUT: Tastiera
         for e in pygame.event.get():
             if e.type == pygame.QUIT:
                 running = False
@@ -545,6 +592,63 @@ def run_single(mode):
                     cur.y = 0
                     cur.rot %= 4
                     can_hold = False
+
+        # === INPUT: Controller P1
+        if not (game_over or flash_timer > 0):
+            actions = read_controller_actions(joy1, repeat_timers_p1)
+            for act in actions:
+                if act == "left":
+                    cur.x -= 1
+                    if not valid_space(cur, grid): cur.x += 1
+                elif act == "right":
+                    cur.x += 1
+                    if not valid_space(cur, grid): cur.x -= 1
+                elif act == "down":
+                    cur.y += 1
+                    if valid_space(cur, grid): score += 1
+                    else: cur.y -= 1
+                elif act == "rotate_cw":
+                    cur.try_rotate(+1, grid)
+                elif act == "rotate_ccw":
+                    cur.try_rotate(-1, grid)
+                elif act == "rotate_180":
+                    cur.try_rotate(+1, grid); cur.try_rotate(+1, grid)
+                elif act == "hard_drop":
+                    dist = 0
+                    while valid_space(cur, grid):
+                        cur.y += 1; dist += 1
+                    cur.y -= 1; dist -= 1
+                    if dist > 0: score += dist * 2
+                elif act == "hold" and can_hold:
+                    if hold is None:
+                        hold = cur
+                        cur = nxt
+                        nxt = bag.get_piece()
+                    else:
+                        hold, cur = cur, hold
+                    spawn_w = len(cur.shape[0])
+                    cur.x = COLUMNS // 2 - spawn_w // 2
+                    cur.y = 0
+                    cur.rot %= 4
+                    can_hold = False
+
+        # caduta automatica
+        if not game_over and flash_timer == 0 and fall_time >= fall_speed*1000:
+            fall_time = 0
+            cur.y += 1
+            if not valid_space(cur, grid):
+                cur.y -= 1
+                # lock
+                for pos in cur.cells():
+                    locked[pos] = cur.color
+                # check righe
+                to_clear = [y for y in range(ROWS) if all((x,y) in locked for x in range(COLUMNS))]
+                if to_clear:
+                    flash_rows = to_clear[:]
+                    flash_timer = 350
+                else:
+                    cur = nxt; nxt = bag.get_piece(); can_hold = True
+                    if not valid_space(cur, grid): game_over = True
 
         # ghost
         ghost = Tetromino(cur.type); ghost.rot=cur.rot; ghost.x,ghost.y=cur.x,cur.y
@@ -616,7 +720,7 @@ def add_garbage(locked, lines):
             if ly > 0:
                 locked[(lx, ly-1)] = locked.pop((lx, ly))
             else:
-                # Se c'è qualcosa a y == 0 verrà schiacciato fuori: KO probabile alla prossima spawn
+                # Se c'è qualcosa a y == 0 verrà schiacciato: KO probabile alla prossima spawn
                 pass
         # crea nuova riga in basso
         hole = random.randint(0, COLUMNS-1)
@@ -624,12 +728,26 @@ def add_garbage(locked, lines):
             if x != hole:
                 locked[(x, ROWS-1)] = GARBAGE
 
+def end_msg(screen, text):
+    W,H = screen.get_size()
+    font = pygame.font.SysFont("Arial", 42, True)
+    lbl = font.render(text, True, YELLOW)
+    screen.blit(lbl, (W//2 - lbl.get_width()//2, H//2 - 20))
+    pygame.display.update()
+    pygame.time.wait(2000)
+
 def run_versus():
     margin = 40
     WIDTH_VS = GRID_W*2 + margin
     screen = pygame.display.set_mode((WIDTH_VS, HEIGHT))
     pygame.display.set_caption("Tetris — Versus Locale (con Garbage)")
     clock = pygame.time.Clock()
+
+    # Controller
+    controllers = init_controllers()
+    joy1 = controllers[0] if len(controllers) >= 1 else None
+    joy2 = controllers[1] if len(controllers) >= 2 else None
+    rpt1, rpt2 = {}, {}
 
     # P1
     locked1, bag1 = {}, BagRandomizer()
@@ -676,37 +794,13 @@ def run_versus():
         grid1 = create_grid(locked1)
         grid2 = create_grid(locked2)
 
-        # Caduta P1
-        if not over1 and fall_t1 >= fall_speed*1000:
-            fall_t1 = 0
-            cur1.y += 1
-            if not valid_space(cur1, grid1):
-                cur1.y -= 1
-                for pos in cur1.cells(): locked1[pos] = cur1.color
-                cleared = clear_rows_and_compact(locked1)
-                if cleared >= 2: add_garbage(locked2, cleared-1)
-                cur1 = nxt1; nxt1 = bag1.get_piece(); can_hold1 = True
-                if not valid_space(cur1, create_grid(locked1)): over1 = True
-
-        # Caduta P2
-        if not over2 and fall_t2 >= fall_speed*1000:
-            fall_t2 = 0
-            cur2.y += 1
-            if not valid_space(cur2, grid2):
-                cur2.y -= 1
-                for pos in cur2.cells(): locked2[pos] = cur2.color
-                cleared = clear_rows_and_compact(locked2)
-                if cleared >= 2: add_garbage(locked1, cleared-1)
-                cur2 = nxt2; nxt2 = bag2.get_piece(); can_hold2 = True
-                if not valid_space(cur2, create_grid(locked2)): over2 = True
-
-        # Eventi
+        # === INPUT tastiera (entrambe le parti)
         for e in pygame.event.get():
             if e.type == pygame.QUIT: pygame.quit(); sys.exit()
             if e.type == pygame.KEYDOWN:
                 if e.key == pygame.K_p: paused = not paused
 
-                # P1 (freccette, Z/X, RCTRL/SHIFT)
+                # P1 tastiera (freccette, Z/X, RCTRL/SHIFT)
                 if not over1:
                     if e.key == pygame.K_LEFT:
                         cur1.x -= 1; 
@@ -733,7 +827,7 @@ def run_versus():
                             hold1, cur1 = cur1, hold1
                         sw = len(cur1.shape[0]); cur1.x = COLUMNS//2 - sw//2; cur1.y = 0; cur1.rot%=4; can_hold1=False
 
-                # P2 (WASD, Q/E, C/Space)
+                # P2 tastiera (WASD, Q/E, C/Space)
                 if not over2:
                     if e.key == pygame.K_a:
                         cur2.x -= 1; 
@@ -760,6 +854,86 @@ def run_versus():
                             hold2, cur2 = cur2, hold2
                         sw = len(cur2.shape[0]); cur2.x = COLUMNS//2 - sw//2; cur2.y = 0; cur2.rot%=4; can_hold2=False
 
+        # === INPUT controller P1
+        if not over1:
+            for act in read_controller_actions(joy1, rpt1):
+                if act == "left":
+                    cur1.x -= 1; 
+                    if not valid_space(cur1, grid1): cur1.x += 1
+                elif act == "right":
+                    cur1.x += 1; 
+                    if not valid_space(cur1, grid1): cur1.x -= 1
+                elif act == "down":
+                    cur1.y += 1
+                    if not valid_space(cur1, grid1): cur1.y -= 1
+                elif act == "rotate_cw":
+                    cur1.try_rotate(+1, grid1)
+                elif act == "rotate_ccw":
+                    cur1.try_rotate(-1, grid1)
+                elif act == "rotate_180":
+                    cur1.try_rotate(+1, grid1); cur1.try_rotate(+1, grid1)
+                elif act == "hard_drop":
+                    while valid_space(cur1, grid1): cur1.y += 1
+                    cur1.y -= 1
+                elif act == "hold" and can_hold1:
+                    if hold1 is None:
+                        hold1 = cur1; cur1 = nxt1; nxt1 = bag1.get_piece()
+                    else:
+                        hold1, cur1 = cur1, hold1
+                    sw = len(cur1.shape[0]); cur1.x = COLUMNS//2 - sw//2; cur1.y = 0; cur1.rot%=4; can_hold1=False
+
+        # === INPUT controller P2
+        if not over2:
+            for act in read_controller_actions(joy2, rpt2):
+                if act == "left":
+                    cur2.x -= 1; 
+                    if not valid_space(cur2, grid2): cur2.x += 1
+                elif act == "right":
+                    cur2.x += 1; 
+                    if not valid_space(cur2, grid2): cur2.x -= 1
+                elif act == "down":
+                    cur2.y += 1
+                    if not valid_space(cur2, grid2): cur2.y -= 1
+                elif act == "rotate_cw":
+                    cur2.try_rotate(+1, grid2)
+                elif act == "rotate_ccw":
+                    cur2.try_rotate(-1, grid2)
+                elif act == "rotate_180":
+                    cur2.try_rotate(+1, grid2); cur2.try_rotate(+1, grid2)
+                elif act == "hard_drop":
+                    while valid_space(cur2, grid2): cur2.y += 1
+                    cur2.y -= 1
+                elif act == "hold" and can_hold2:
+                    if hold2 is None:
+                        hold2 = cur2; cur2 = nxt2; nxt2 = bag2.get_piece()
+                    else:
+                        hold2, cur2 = cur2, hold2
+                    sw = len(cur2.shape[0]); cur2.x = COLUMNS//2 - sw//2; cur2.y = 0; cur2.rot%=4; can_hold2=False
+
+        # Caduta P1
+        if not over1 and fall_t1 >= fall_speed*1000:
+            fall_t1 = 0
+            cur1.y += 1
+            if not valid_space(cur1, grid1):
+                cur1.y -= 1
+                for pos in cur1.cells(): locked1[pos] = cur1.color
+                cleared = clear_rows_and_compact(locked1)
+                if cleared >= 2: add_garbage(locked2, cleared-1)
+                cur1 = nxt1; nxt1 = bag1.get_piece(); can_hold1 = True
+                if not valid_space(cur1, create_grid(locked1)): over1 = True
+
+        # Caduta P2
+        if not over2 and fall_t2 >= fall_speed*1000:
+            fall_t2 = 0
+            cur2.y += 1
+            if not valid_space(cur2, grid2):
+                cur2.y -= 1
+                for pos in cur2.cells(): locked2[pos] = cur2.color
+                cleared = clear_rows_and_compact(locked2)
+                if cleared >= 2: add_garbage(locked1, cleared-1)
+                cur2 = nxt2; nxt2 = bag2.get_piece(); can_hold2 = True
+                if not valid_space(cur2, create_grid(locked2)): over2 = True
+
         # Ghosts
         g1 = Tetromino(cur1.type); g1.rot=cur1.rot; g1.x, g1.y = cur1.x, cur1.y
         while valid_space(g1, grid1): g1.y += 1
@@ -785,20 +959,13 @@ def run_versus():
             end_msg(screen, "Pareggio!")
             return
 
-def end_msg(screen, text):
-    W,H = screen.get_size()
-    font = pygame.font.SysFont("Arial", 42, True)
-    lbl = font.render(text, True, YELLOW)
-    screen.blit(lbl, (W//2 - lbl.get_width()//2, H//2 - 20))
-    pygame.display.update()
-    pygame.time.wait(2000)
-
 # =========================
 # Main
 # =========================
 def main():
     pygame.init()
     screen = pygame.display.set_mode((WIDTH_SINGLE, HEIGHT))
+    pygame.display.set_caption("Tetris — Completo (Controller Ready)")
     while True:
         choice = main_menu(screen)
         if choice == "single":
