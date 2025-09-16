@@ -36,7 +36,6 @@ COLORS = {
 }
 
 LINE_SCORES = {1: 100, 2: 300, 3: 500, 4: 800}
-
 # =========================
 # Rotazioni SRS (matrici)
 # =========================
@@ -163,11 +162,11 @@ class BagRandomizer:
     def get_piece(self):
         if not self.bag: self.refill()
         return Tetromino(self.bag.pop(0))
-
 # =========================
 # Utility griglia / file
 # =========================
 def create_grid(locked):
+    """Crea una griglia 10x20 a partire dai blocchi bloccati"""
     g = [[BLACK for _ in range(COLUMNS)] for _ in range(ROWS)]
     for (x, y), c in locked.items():
         if 0 <= x < COLUMNS and 0 <= y < ROWS:
@@ -175,25 +174,59 @@ def create_grid(locked):
     return g
 
 def valid_space(p, g):
+    """Controlla se un tetramino p è in una posizione valida sulla griglia g"""
     for x, y in p.cells():
-        if x < 0 or x >= COLUMNS or y >= ROWS: return False
-        if y >= 0 and g[y][x] != BLACK: return False
+        if x < 0 or x >= COLUMNS or y >= ROWS:
+            return False
+        if y >= 0 and g[y][x] != BLACK:
+            return False
     return True
 
 def load_highscore():
+    """Carica l’highscore da file"""
     try:
-        with open(HIGHSCORE_FILE) as f: return int(f.read().strip())
+        with open(HIGHSCORE_FILE) as f:
+            return int(f.read().strip())
     except:
         return 0
 
 def save_highscore(s):
+    """Salva l’highscore su file"""
     try:
-        with open(HIGHSCORE_FILE, "w") as f: f.write(str(s))
+        with open(HIGHSCORE_FILE, "w") as f:
+            f.write(str(s))
     except:
         pass
 
 # =========================
-# Disegno (single)
+# Garbage & gestione righe (per il versus)
+# =========================
+def clear_rows_and_compact(locked):
+    """Ritorna quante righe sono state pulite ed esegue la compattazione"""
+    full = [y for y in range(ROWS) if all((x,y) in locked for x in range(COLUMNS))]
+    for y in full:
+        for x in range(COLUMNS):
+            locked.pop((x,y), None)
+        # sposta giù tutto ciò che sta sopra
+        for (lx, ly) in sorted(list(locked), key=lambda k: k[1])[::-1]:
+            if ly < y:
+                locked[(lx, ly+1)] = locked.pop((lx, ly))
+    return len(full)
+
+def add_garbage(locked, lines):
+    """Aggiunge righe di spazzatura al campo (versus)"""
+    for _ in range(lines):
+        # spingi su tutto
+        for (lx, ly) in sorted(list(locked), key=lambda k: k[1]):
+            if ly > 0:
+                locked[(lx, ly-1)] = locked.pop((lx, ly))
+        # crea nuova riga in basso con un buco
+        hole = random.randint(0, COLUMNS-1)
+        for x in range(COLUMNS):
+            if x != hole:
+                locked[(x, ROWS-1)] = GARBAGE
+# =========================
+# Disegno (single player)
 # =========================
 def draw_block(surf, x, y, color, ghost=False):
     r = pygame.Rect(x*BLOCK_SIZE, y*BLOCK_SIZE, BLOCK_SIZE, BLOCK_SIZE)
@@ -216,7 +249,8 @@ def draw_mini_piece(surf, piece, x, y, scale=20):
                 pygame.draw.rect(surf, piece.color, r)
                 pygame.draw.rect(surf, BLACK, r, 1)
 
-def draw_side_panel(surf, score, hs, lines, level, nextp, holdp, music_on, mode, time_left):
+def draw_side_panel(surf, score, hs, lines, level, nextp, holdp,
+                    music_on, mode, time_left):
     px = GRID_W
     pygame.draw.rect(surf, (25,25,25), (px, 0, SIDE_PANEL_W, HEIGHT))
     f = pygame.font.SysFont("Arial", 20, True)
@@ -250,19 +284,24 @@ def draw_side_panel(surf, score, hs, lines, level, nextp, holdp, music_on, mode,
 
     surf.blit(f.render(f"Music: {'ON' if music_on else 'OFF'}", True, WHITE), (px+20, 540))
 
-def draw_window_single(surf, grid, score, hs, lines, level, nextp, holdp, ghost_pos, game_over, flash_rows, music_on, mode, time_left):
+def draw_window_single(surf, grid, score, hs, lines, level, nextp, holdp,
+                       ghost_pos, game_over, flash_rows,
+                       music_on, mode, time_left):
     surf.fill((10,10,30))
     # ghost
     for x, y in ghost_pos:
-        if y >= 0: draw_block(surf, x, y, GHOSTC, True)
+        if y >= 0:
+            draw_block(surf, x, y, GHOSTC, True)
     # celle
     for y in range(ROWS):
         for x in range(COLUMNS):
             if grid[y][x] != BLACK:
                 color = WHITE if y in flash_rows else grid[y][x]
                 draw_block(surf, x, y, color)
+
     draw_grid_lines(surf)
-    draw_side_panel(surf, score, hs, lines, level, nextp, holdp, music_on, mode, time_left)
+    draw_side_panel(surf, score, hs, lines, level, nextp, holdp,
+                    music_on, mode, time_left)
 
     if game_over:
         f = pygame.font.SysFont("Arial", 48, True)
@@ -286,24 +325,32 @@ def draw_board_vs(surf, grid, ox, title, nextp, holdp, ghost_pos=None):
     # ghost
     if ghost_pos:
         for x,y in ghost_pos:
-            if y>=0: draw_block_offset(surf, x, y, GHOSTC, ox)
+            if y >= 0:
+                draw_block_offset(surf, x, y, GHOSTC, ox)
+
     # celle
     for y in range(ROWS):
         for x in range(COLUMNS):
             if grid[y][x] != BLACK:
                 draw_block_offset(surf, x, y, grid[y][x], ox)
+
     # griglia
     for x in range(COLUMNS+1):
-        pygame.draw.line(surf, DGRAY, (ox+x*BLOCK_SIZE, 0), (ox+x*BLOCK_SIZE, GRID_H))
+        pygame.draw.line(surf, DGRAY,
+                         (ox+x*BLOCK_SIZE, 0),
+                         (ox+x*BLOCK_SIZE, GRID_H))
     for y in range(ROWS+1):
-        pygame.draw.line(surf, DGRAY, (ox, y*BLOCK_SIZE), (ox+GRID_W, y*BLOCK_SIZE))
+        pygame.draw.line(surf, DGRAY,
+                         (ox, y*BLOCK_SIZE),
+                         (ox+GRID_W, y*BLOCK_SIZE))
+
     # next / hold
     f = pygame.font.SysFont("Arial", 16, True)
     surf.blit(f.render("Next", True, WHITE), (ox + 8, GRID_H - 94))
     draw_mini_piece(surf, nextp, ox + 8, GRID_H - 72, scale=18)
     surf.blit(f.render("Hold", True, WHITE), (ox + GRID_W - 90, GRID_H - 94))
-    if holdp: draw_mini_piece(surf, holdp, ox + GRID_W - 90, GRID_H - 72, scale=18)
-
+    if holdp:
+        draw_mini_piece(surf, holdp, ox + GRID_W - 90, GRID_H - 72, scale=18)
 # =========================
 # Controller support
 # =========================
@@ -320,7 +367,7 @@ def init_controllers():
     return ctrls
 
 def axis_once(timer_dict, key, now, delay=REPEAT_DELAY):
-    """Restituisce True se è passato abbastanza tempo per ripetere l'azione."""
+    """Ritorna True se è passato abbastanza tempo per consentire il repeat di un asse."""
     t = timer_dict.get(key, 0)
     if now - t >= delay:
         timer_dict[key] = now
@@ -329,11 +376,12 @@ def axis_once(timer_dict, key, now, delay=REPEAT_DELAY):
 
 def read_controller_actions(joy, repeat_timers):
     """Ritorna una lista di azioni astratte dal controller."""
-    if joy is None: return []
+    if joy is None:
+        return []
     actions = []
     now = pygame.time.get_ticks()
 
-    # Assi (0: orizz, 1: vert). Use deadzone e auto-repeat per L/R
+    # Assi (0: orizz, 1: vert)
     try:
         ax0 = joy.get_axis(0)
         ax1 = joy.get_axis(1)
@@ -342,34 +390,27 @@ def read_controller_actions(joy, repeat_timers):
 
     if ax0 < -DEADZONE and axis_once(repeat_timers, "left", now):
         actions.append("left")
-    if ax0 >  DEADZONE and axis_once(repeat_timers, "right", now):
+    if ax0 > DEADZONE and axis_once(repeat_timers, "right", now):
         actions.append("right")
-    if ax1 >  DEADZONE:
+    if ax1 > DEADZONE:
         actions.append("down")
 
-    # Bottoni tipici XBOX/PS (fallback generico)
-    # 0:A / X → rotate_cw
-    # 1:B / O → rotate_ccw
-    # 2:X / Square → rotate_180 (o alternativa)
-    # 3:Y / Triangle → hold
-    # 5:RB → hard drop
-    # 7:Start → pausa (gestita fuori)
+    # Bottoni (layout standard Xbox/PS)
     try:
-        if joy.get_button(0): actions.append("rotate_cw")
-        if joy.get_button(1): actions.append("rotate_ccw")
-        if joy.get_button(2): actions.append("rotate_180")
-        if joy.get_button(3): actions.append("hold")
-        if joy.get_button(5): actions.append("hard_drop")
+        if joy.get_button(0): actions.append("rotate_cw")     # A / X
+        if joy.get_button(1): actions.append("rotate_ccw")    # B / O
+        if joy.get_button(2): actions.append("rotate_180")    # X / Square
+        if joy.get_button(3): actions.append("hold")          # Y / Triangle
+        if joy.get_button(5): actions.append("hard_drop")     # RB
     except Exception:
         pass
 
     return actions
-
 # =========================
 # Menu e Istruzioni
 # =========================
 def show_instructions(screen):
-    W,H = screen.get_size()
+    W, H = screen.get_size()
     font_title = pygame.font.SysFont("Arial", 36, True)
     font = pygame.font.SysFont("Arial", 22)
     screen.fill((0, 0, 30))
@@ -391,7 +432,7 @@ def show_instructions(screen):
     ]
     misc = [
         "Generali: M = Musica ON/OFF | P = Pausa",
-        "Single: Marathon / Time Attack (3 min)",
+        "Single: Marathon / Time Attack (3 min) + Difficoltà",
         "Versus: Garbage attack (2→1, 3→2, 4→3)",
     ]
 
@@ -412,11 +453,14 @@ def show_instructions(screen):
     waiting = True
     while waiting:
         for e in pygame.event.get():
-            if e.type == pygame.QUIT: pygame.quit(); sys.exit()
-            if e.type == pygame.KEYDOWN: waiting = False
+            if e.type == pygame.QUIT:
+                pygame.quit(); sys.exit()
+            if e.type == pygame.KEYDOWN:
+                waiting = False
+
 
 def main_menu(screen):
-    W,H = WIDTH_SINGLE, HEIGHT
+    W, H = WIDTH_SINGLE, HEIGHT
     font_title = pygame.font.SysFont("Arial", 40, True)
     font = pygame.font.SysFont("Arial", 28)
 
@@ -438,27 +482,32 @@ def main_menu(screen):
         pygame.display.update()
 
         for e in pygame.event.get():
-            if e.type == pygame.QUIT: pygame.quit(); sys.exit()
+            if e.type == pygame.QUIT:
+                pygame.quit(); sys.exit()
             if e.type == pygame.KEYDOWN:
                 if e.key == pygame.K_1: return "single"
                 if e.key == pygame.K_2: return "versus"
                 if e.key == pygame.K_h: show_instructions(screen)
                 if e.key == pygame.K_q: pygame.quit(); sys.exit()
 
+
 def single_mode_menu(screen):
-    W,H = WIDTH_SINGLE, HEIGHT
+    W, H = WIDTH_SINGLE, HEIGHT
     f = pygame.font.SysFont("Arial", 36, True)
     s = pygame.font.SysFont("Arial", 26)
     while True:
-        screen.fill((0,0,30))
+        screen.fill((0, 0, 30))
         t = f.render("Single Player", True, YELLOW)
-        screen.blit(t, (W//2 - t.get_width()//2, 140))
+        screen.blit(t, (W // 2 - t.get_width() // 2, 100))
+
         o1 = s.render("1 - Marathon", True, WHITE)
         o2 = s.render("2 - Time Attack (3 min)", True, WHITE)
         esc = s.render("Esc - Indietro", True, WHITE)
-        screen.blit(o1, (W//2 - o1.get_width()//2, 240))
-        screen.blit(o2, (W//2 - o2.get_width()//2, 280))
-        screen.blit(esc, (W//2 - esc.get_width()//2, 340))
+
+        screen.blit(o1, (W // 2 - o1.get_width() // 2, 180))
+        screen.blit(o2, (W // 2 - o2.get_width() // 2, 220))
+        screen.blit(esc, (W // 2 - esc.get_width() // 2, 280))
+
         pygame.display.update()
         for e in pygame.event.get():
             if e.type == pygame.QUIT: pygame.quit(); sys.exit()
@@ -467,22 +516,45 @@ def single_mode_menu(screen):
                 if e.key == pygame.K_2: return "Time Attack"
                 if e.key == pygame.K_ESCAPE: return None
 
+
+def difficulty_menu(screen):
+    W, H = WIDTH_SINGLE, HEIGHT
+    f = pygame.font.SysFont("Arial", 36, True)
+    s = pygame.font.SysFont("Arial", 26)
+    while True:
+        screen.fill((0, 0, 30))
+        t = f.render("Seleziona Difficoltà", True, YELLOW)
+        screen.blit(t, (W // 2 - t.get_width() // 2, 100))
+
+        d1 = s.render("1 - Facile (lento)", True, WHITE)
+        d2 = s.render("2 - Normale", True, WHITE)
+        d3 = s.render("3 - Difficile (veloce)", True, WHITE)
+        esc = s.render("Esc - Indietro", True, WHITE)
+
+        screen.blit(d1, (W // 2 - d1.get_width() // 2, 180))
+        screen.blit(d2, (W // 2 - d2.get_width() // 2, 220))
+        screen.blit(d3, (W // 2 - d3.get_width() // 2, 260))
+        screen.blit(esc, (W // 2 - esc.get_width() // 2, 320))
+
+        pygame.display.update()
+        for e in pygame.event.get():
+            if e.type == pygame.QUIT: pygame.quit(); sys.exit()
+            if e.type == pygame.KEYDOWN:
+                if e.key == pygame.K_1: return "Easy"
+                if e.key == pygame.K_2: return "Normal"
+                if e.key == pygame.K_3: return "Hard"
+                if e.key == pygame.K_ESCAPE: return None
 # =========================
 # Modalità Single Player
 # =========================
-def run_single(mode):
+def run_single(mode, difficulty):
     pygame.mixer.init()
     screen = pygame.display.set_mode((WIDTH_SINGLE, HEIGHT))
-    pygame.display.set_caption(f"Tetris — Single Player ({mode})")
+    pygame.display.set_caption(f"Tetris — Single Player ({mode}, {difficulty})")
     clock = pygame.time.Clock()
 
     # Musica opzionale
     music_on = False
-    # try:
-    #     pygame.mixer.music.load("music/tetris_theme.ogg")
-    #     pygame.mixer.music.play(-1)
-    #     music_on = True
-    # except: pass
 
     # Controller
     controllers = init_controllers()
@@ -490,12 +562,19 @@ def run_single(mode):
     repeat_timers_p1 = {}
 
     fall_time = 0
-    fall_speed = 0.5
     score = 0
     lines = 0
     level = 1
     hs = load_highscore()
     paused = False
+
+    # Velocità iniziale in base alla difficoltà
+    if difficulty == "Easy":
+        fall_speed = 0.8
+    elif difficulty == "Hard":
+        fall_speed = 0.3
+    else:
+        fall_speed = 0.5
 
     if mode == "Time Attack":
         total_time = 180
@@ -520,20 +599,20 @@ def run_single(mode):
         if paused:
             # Draw pause overlay
             grid = create_grid(locked)
-            ghost = Tetromino(cur.type); ghost.rot=cur.rot; ghost.x,ghost.y=cur.x,cur.y
+            ghost = Tetromino(cur.type); ghost.rot = cur.rot; ghost.x, ghost.y = cur.x, cur.y
             while valid_space(ghost, grid): ghost.y += 1
             ghost.y -= 1
             ghost_pos = ghost.cells()
             draw_window_single(screen, grid, score, hs, lines, level, nxt, hold, ghost_pos,
                                game_over, flash_rows, music_on, mode,
                                (max(0, total_time - int(time.time() - start_time)) if mode=="Time Attack" else 0))
-            font=pygame.font.SysFont("Arial",48,True)
-            lbl=font.render("PAUSED",True,YELLOW)
-            screen.blit(lbl,(GRID_W//2-lbl.get_width()//2, HEIGHT//2-30))
+            font = pygame.font.SysFont("Arial", 48, True)
+            lbl = font.render("PAUSED", True, YELLOW)
+            screen.blit(lbl, (GRID_W//2 - lbl.get_width()//2, HEIGHT//2-30))
             pygame.display.update()
             for e in pygame.event.get():
-                if e.type==pygame.QUIT: running=False
-                if e.type==pygame.KEYDOWN and e.key==pygame.K_p: paused=False
+                if e.type == pygame.QUIT: running = False
+                if e.type == pygame.KEYDOWN and e.key == pygame.K_p: paused = False
             continue
 
         grid = create_grid(locked)
@@ -651,7 +730,7 @@ def run_single(mode):
                     if not valid_space(cur, grid): game_over = True
 
         # ghost
-        ghost = Tetromino(cur.type); ghost.rot=cur.rot; ghost.x,ghost.y=cur.x,cur.y
+        ghost = Tetromino(cur.type); ghost.rot=cur.rot; ghost.x, ghost.y=cur.x,cur.y
         while valid_space(ghost, grid): ghost.y += 1
         ghost.y -= 1
         ghost_pos = ghost.cells()
@@ -696,9 +775,8 @@ def run_single(mode):
     if score > hs: save_highscore(score)
     pygame.quit()
     sys.exit()
-
 # =========================
-# Modalità Versus con Garbage
+# Modalità Versus con Garbage e Difficoltà
 # =========================
 def clear_rows_and_compact(locked):
     """Ritorna quante righe sono state pulite ed esegue la compattazione (senza animazione)."""
@@ -719,28 +797,20 @@ def add_garbage(locked, lines):
         for (lx, ly) in sorted(list(locked), key=lambda k: k[1]):
             if ly > 0:
                 locked[(lx, ly-1)] = locked.pop((lx, ly))
-            else:
-                # Se c'è qualcosa a y == 0 verrà schiacciato: KO probabile alla prossima spawn
-                pass
         # crea nuova riga in basso
         hole = random.randint(0, COLUMNS-1)
         for x in range(COLUMNS):
             if x != hole:
                 locked[(x, ROWS-1)] = GARBAGE
 
-def end_msg(screen, text):
-    W,H = screen.get_size()
-    font = pygame.font.SysFont("Arial", 42, True)
-    lbl = font.render(text, True, YELLOW)
-    screen.blit(lbl, (W//2 - lbl.get_width()//2, H//2 - 20))
-    pygame.display.update()
-    pygame.time.wait(2000)
-
-def run_versus():
+# =========================
+# Modalità Versus con Garbage e Difficoltà
+# =========================
+def run_versus(difficulty):
     margin = 40
     WIDTH_VS = GRID_W*2 + margin
     screen = pygame.display.set_mode((WIDTH_VS, HEIGHT))
-    pygame.display.set_caption("Tetris — Versus Locale (con Garbage)")
+    pygame.display.set_caption(f"Tetris — Versus Locale ({difficulty})")
     clock = pygame.time.Clock()
 
     # Controller
@@ -759,7 +829,15 @@ def run_versus():
     hold2, can_hold2 = None, True
 
     fall_t1 = fall_t2 = 0
-    fall_speed = 0.5
+
+    # Velocità iniziale in base alla difficoltà
+    if difficulty == "Easy":
+        fall_speed = 0.8
+    elif difficulty == "Hard":
+        fall_speed = 0.3
+    else:
+        fall_speed = 0.5
+
     over1 = over2 = False
     paused = False
 
@@ -767,46 +845,61 @@ def run_versus():
         dt = clock.tick(60)
         if paused:
             # Disegna schermata pausa
-            grid1 = create_grid(locked1); grid2 = create_grid(locked2)
+            grid1 = create_grid(locked1)
+            grid2 = create_grid(locked2)
+
             # ghost p1
-            g1 = Tetromino(cur1.type); g1.rot=cur1.rot; g1.x, g1.y = cur1.x, cur1.y
+            g1 = Tetromino(cur1.type)
+            g1.rot = cur1.rot
+            g1.x, g1.y = cur1.x, cur1.y
             while valid_space(g1, grid1): g1.y += 1
-            g1.y -= 1; ghost1 = g1.cells()
+            g1.y -= 1
+            ghost1 = g1.cells()
+
             # ghost p2
-            g2 = Tetromino(cur2.type); g2.rot=cur2.rot; g2.x, g2.y = cur2.x, cur2.y
+            g2 = Tetromino(cur2.type)
+            g2.rot = cur2.rot
+            g2.x, g2.y = cur2.x, cur2.y
             while valid_space(g2, grid2): g2.y += 1
-            g2.y -= 1; ghost2 = g2.cells()
+            g2.y -= 1
+            ghost2 = g2.cells()
 
             screen.fill((10,10,30))
             draw_board_vs(screen, grid1, 10, "P1", nxt1, hold1, ghost1)
             draw_board_vs(screen, grid2, GRID_W + margin, "P2", nxt2, hold2, ghost2)
-            font=pygame.font.SysFont("Arial",48,True)
-            lbl=font.render("PAUSED",True,YELLOW)
+
+            font = pygame.font.SysFont("Arial",48,True)
+            lbl = font.render("PAUSED", True, YELLOW)
             screen.blit(lbl, (WIDTH_VS//2 - lbl.get_width()//2, HEIGHT//2 - 30))
             pygame.display.update()
+
             for e in pygame.event.get():
-                if e.type==pygame.QUIT: pygame.quit(); sys.exit()
-                if e.type==pygame.KEYDOWN and e.key==pygame.K_p: paused=False
+                if e.type == pygame.QUIT:
+                    pygame.quit(); sys.exit()
+                if e.type == pygame.KEYDOWN and e.key == pygame.K_p:
+                    paused = False
             continue
 
-        fall_t1 += dt; fall_t2 += dt
-
+        fall_t1 += dt
+        fall_t2 += dt
         grid1 = create_grid(locked1)
         grid2 = create_grid(locked2)
 
-        # === INPUT tastiera (entrambe le parti)
+        # === INPUT tastiera
         for e in pygame.event.get():
-            if e.type == pygame.QUIT: pygame.quit(); sys.exit()
+            if e.type == pygame.QUIT:
+                pygame.quit(); sys.exit()
             if e.type == pygame.KEYDOWN:
-                if e.key == pygame.K_p: paused = not paused
+                if e.key == pygame.K_p:
+                    paused = not paused
 
-                # P1 tastiera (freccette, Z/X, RCTRL/SHIFT)
+                # --- Player 1 (freccette + Z/X/RShift/RCtrl)
                 if not over1:
                     if e.key == pygame.K_LEFT:
-                        cur1.x -= 1; 
+                        cur1.x -= 1
                         if not valid_space(cur1, grid1): cur1.x += 1
                     elif e.key == pygame.K_RIGHT:
-                        cur1.x += 1; 
+                        cur1.x += 1
                         if not valid_space(cur1, grid1): cur1.x -= 1
                     elif e.key == pygame.K_DOWN:
                         cur1.y += 1
@@ -817,7 +910,7 @@ def run_versus():
                         cur1.try_rotate(-1, grid1)
                     elif e.key == pygame.K_x:
                         cur1.try_rotate(+1, grid1); cur1.try_rotate(+1, grid1)
-                    elif e.key == pygame.K_RSHIFT:
+                    elif e.key == pygame.K_RSHIFT:  # hard drop
                         while valid_space(cur1, grid1): cur1.y += 1
                         cur1.y -= 1
                     elif e.key == pygame.K_RCTRL and can_hold1:
@@ -825,15 +918,17 @@ def run_versus():
                             hold1 = cur1; cur1 = nxt1; nxt1 = bag1.get_piece()
                         else:
                             hold1, cur1 = cur1, hold1
-                        sw = len(cur1.shape[0]); cur1.x = COLUMNS//2 - sw//2; cur1.y = 0; cur1.rot%=4; can_hold1=False
+                        sw = len(cur1.shape[0])
+                        cur1.x = COLUMNS//2 - sw//2; cur1.y = 0; cur1.rot %= 4
+                        can_hold1 = False
 
-                # P2 tastiera (WASD, Q/E, C/Space)
+                # --- Player 2 (WASD + Q/E/C/Space)
                 if not over2:
                     if e.key == pygame.K_a:
-                        cur2.x -= 1; 
+                        cur2.x -= 1
                         if not valid_space(cur2, grid2): cur2.x += 1
                     elif e.key == pygame.K_d:
-                        cur2.x += 1; 
+                        cur2.x += 1
                         if not valid_space(cur2, grid2): cur2.x -= 1
                     elif e.key == pygame.K_s:
                         cur2.y += 1
@@ -844,7 +939,7 @@ def run_versus():
                         cur2.try_rotate(-1, grid2)
                     elif e.key == pygame.K_e:
                         cur2.try_rotate(+1, grid2); cur2.try_rotate(+1, grid2)
-                    elif e.key == pygame.K_SPACE:
+                    elif e.key == pygame.K_SPACE:  # hard drop
                         while valid_space(cur2, grid2): cur2.y += 1
                         cur2.y -= 1
                     elif e.key == pygame.K_c and can_hold2:
@@ -852,16 +947,18 @@ def run_versus():
                             hold2 = cur2; cur2 = nxt2; nxt2 = bag2.get_piece()
                         else:
                             hold2, cur2 = cur2, hold2
-                        sw = len(cur2.shape[0]); cur2.x = COLUMNS//2 - sw//2; cur2.y = 0; cur2.rot%=4; can_hold2=False
+                        sw = len(cur2.shape[0])
+                        cur2.x = COLUMNS//2 - sw//2; cur2.y = 0; cur2.rot %= 4
+                        can_hold2 = False
 
         # === INPUT controller P1
         if not over1:
             for act in read_controller_actions(joy1, rpt1):
                 if act == "left":
-                    cur1.x -= 1; 
+                    cur1.x -= 1
                     if not valid_space(cur1, grid1): cur1.x += 1
                 elif act == "right":
-                    cur1.x += 1; 
+                    cur1.x += 1
                     if not valid_space(cur1, grid1): cur1.x -= 1
                 elif act == "down":
                     cur1.y += 1
@@ -880,16 +977,18 @@ def run_versus():
                         hold1 = cur1; cur1 = nxt1; nxt1 = bag1.get_piece()
                     else:
                         hold1, cur1 = cur1, hold1
-                    sw = len(cur1.shape[0]); cur1.x = COLUMNS//2 - sw//2; cur1.y = 0; cur1.rot%=4; can_hold1=False
+                    sw = len(cur1.shape[0])
+                    cur1.x = COLUMNS//2 - sw//2; cur1.y = 0; cur1.rot %= 4
+                    can_hold1 = False
 
         # === INPUT controller P2
         if not over2:
             for act in read_controller_actions(joy2, rpt2):
                 if act == "left":
-                    cur2.x -= 1; 
+                    cur2.x -= 1
                     if not valid_space(cur2, grid2): cur2.x += 1
                 elif act == "right":
-                    cur2.x += 1; 
+                    cur2.x += 1
                     if not valid_space(cur2, grid2): cur2.x -= 1
                 elif act == "down":
                     cur2.y += 1
@@ -908,9 +1007,12 @@ def run_versus():
                         hold2 = cur2; cur2 = nxt2; nxt2 = bag2.get_piece()
                     else:
                         hold2, cur2 = cur2, hold2
-                    sw = len(cur2.shape[0]); cur2.x = COLUMNS//2 - sw//2; cur2.y = 0; cur2.rot%=4; can_hold2=False
+                    sw = len(cur2.shape[0])
+                    cur2.x = COLUMNS//2 - sw//2; cur2.y = 0; cur2.rot %= 4
+                    can_hold2 = False
 
-        # Caduta P1
+
+        # Caduta automatica P1
         if not over1 and fall_t1 >= fall_speed*1000:
             fall_t1 = 0
             cur1.y += 1
@@ -922,7 +1024,7 @@ def run_versus():
                 cur1 = nxt1; nxt1 = bag1.get_piece(); can_hold1 = True
                 if not valid_space(cur1, create_grid(locked1)): over1 = True
 
-        # Caduta P2
+        # Caduta automatica P2
         if not over2 and fall_t2 >= fall_speed*1000:
             fall_t2 = 0
             cur2.y += 1
@@ -934,18 +1036,18 @@ def run_versus():
                 cur2 = nxt2; nxt2 = bag2.get_piece(); can_hold2 = True
                 if not valid_space(cur2, create_grid(locked2)): over2 = True
 
-        # Ghosts
-        g1 = Tetromino(cur1.type); g1.rot=cur1.rot; g1.x, g1.y = cur1.x, cur1.y
-        while valid_space(g1, grid1): g1.y += 1
-        g1.y -= 1; ghost1 = g1.cells()
-        g2 = Tetromino(cur2.type); g2.rot=cur2.rot; g2.x, g2.y = cur2.x, cur2.y
-        while valid_space(g2, grid2): g2.y += 1
-        g2.y -= 1; ghost2 = g2.cells()
+        # 👇 FIX: aggiungi i pezzi correnti ai campi
+        for x, y in cur1.cells():
+            if y >= 0:
+                grid1[y][x] = cur1.color
+        for x, y in cur2.cells():
+            if y >= 0:
+                grid2[y][x] = cur2.color
 
         # Disegno
         screen.fill((10,10,30))
-        draw_board_vs(screen, grid1, 10, "P1", nxt1, hold1, ghost1)
-        draw_board_vs(screen, grid2, GRID_W + margin, "P2", nxt2, hold2, ghost2)
+        draw_board_vs(screen, grid1, 10, "P1", nxt1, hold1)
+        draw_board_vs(screen, grid2, GRID_W + margin, "P2", nxt2, hold2)
         pygame.display.update()
 
         # Fine partita
@@ -960,19 +1062,36 @@ def run_versus():
             return
 
 # =========================
+# End Message
+# =========================
+def end_msg(screen, text):
+    W,H = screen.get_size()
+    font = pygame.font.SysFont("Arial", 42, True)
+    lbl = font.render(text, True, YELLOW)
+    screen.blit(lbl, (W//2 - lbl.get_width()//2, H//2 - 20))
+    pygame.display.update()
+    pygame.time.wait(2500)
+
+# =========================
 # Main
 # =========================
 def main():
     pygame.init()
     screen = pygame.display.set_mode((WIDTH_SINGLE, HEIGHT))
-    pygame.display.set_caption("Tetris — Completo (Controller Ready)")
+    pygame.display.set_caption("Tetris — Completo (Controller + Difficoltà)")
+
     while True:
         choice = main_menu(screen)
         if choice == "single":
             mode = single_mode_menu(screen)
-            if mode: run_single(mode)
+            if mode:
+                diff = difficulty_menu(screen)
+                if diff:
+                    run_single(mode, diff)
         elif choice == "versus":
-            run_versus()
+            diff = difficulty_menu(screen)
+            if diff:
+                run_versus(diff)
 
 if __name__ == "__main__":
     main()
